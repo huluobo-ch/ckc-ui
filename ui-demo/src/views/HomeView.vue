@@ -1,7 +1,7 @@
 <template>
   <div class="wrapper">
     <!-- useSource="mobile" -->
-     <div class="main">
+     <div class="main" ref="selectionRootRef">
       <CkcAnswer 
         ref="ckcAnswerRef"
         :messages="messages"  
@@ -24,6 +24,23 @@
       </CkcAnswer>
      </div>
 
+     <Teleport to="body">
+      <div
+        v-show="selectionVisible"
+        ref="selectionToolbarRef"
+        class="selection-ask-toolbar"
+        :style="{ top: `${selectionTop}px`, left: `${selectionLeft}px` }"
+        @mousedown.prevent
+      >
+        <button type="button" class="selection-ask-toolbar__btn" @click="addSelectionToDialogue">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M7 7h5v5H9.5A2.5 2.5 0 0 1 7 9.5V7Zm8 0h5v5h-2.5A2.5 2.5 0 0 1 15 9.5V7Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+          </svg>
+          添加至对话
+        </button>
+      </div>
+     </Teleport>
+
     <!-- <button @click="stopChat()">清空消息</button> -->
   </div>
 </template>
@@ -34,9 +51,10 @@
   import {CustomData, CustomDataArray } from '../../../src/components/CompForAnswer/index.ts';
   import mitt from 'mitt';
   import type { Message, Document } from '../../../src/components/types/message';
-  import { message } from '../const/mock-data/message2';
+  import { message } from '../const/mock-data/message-file';
   import { setCustomComponents, MarkdownCodeBlockNode, CodeBlockNode } from 'markstream-vue';
   import { MarkdownRender } from 'markstream-vue';
+  import { useSelectionAsk } from '../composables/useSelectionAsk';
   // import CustomComp from '../components/customComp.vue';
 
   const cardEmitter = mitt();
@@ -68,6 +86,15 @@
     'code_block': CodeBlockNode
   })
   const ckcAnswerRef = ref<InstanceType<typeof CkcAnswer> | null>(null)
+  const selectionRootRef = ref<HTMLElement | null>(null)
+  const {
+    visible: selectionVisible,
+    selectedText,
+    top: selectionTop,
+    left: selectionLeft,
+    toolbarRef: selectionToolbarRef,
+    hide: hideSelectionToolbar,
+  } = useSelectionAsk(selectionRootRef)
   const messages = ref<Message[]>([]);
   const historyMessages = ref<Message[]>([]);
   function alterMessages(actionsProps: any) {
@@ -81,6 +108,12 @@
   }
   function documentClick(message: Document) {
     console.log('documentClick', message)
+  }
+  function addSelectionToDialogue() {
+    const text = selectedText.value
+    if (!text.trim()) return
+    console.log('add to dialogue', text)
+    hideSelectionToolbar()
   }
   onMounted(() => {
     let index = 0;
@@ -107,6 +140,34 @@
   }
   .main {
     width: 800px;
+  }
+  .selection-ask-toolbar {
+    position: fixed;
+    z-index: 3000;
+    transform: translate(-50%, -100%);
+    display: flex;
+    align-items: center;
+    padding: 6px 10px;
+    background: #fff;
+    border-radius: 10px;
+    box-shadow: 0 6px 20px rgba(23, 32, 77, 0.16);
+    user-select: none;
+  }
+  .selection-ask-toolbar__btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: 0;
+    background: transparent;
+    padding: 4px 6px;
+    color: #1f2430;
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .selection-ask-toolbar__btn:hover {
+    color: #4f7dff;
   }
 </style>
 

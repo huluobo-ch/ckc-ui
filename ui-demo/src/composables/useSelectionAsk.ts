@@ -297,50 +297,165 @@ function rectsFromClientRectList(list: ArrayLike<{ left: number; top: number; wi
   return rects
 }
 
-/** 多块选区矩形时取离指针最近的一块，避免用到代码块顶部的第一段 */
-function pickRectNearPointer(rects: DOMRect[]): DOMRect | null {
-  if (!rects.length) return null
-  const pt = pinToolbarToPointer ? activePointer() : null
-  if (!pt) return unionRects(rects)
-  let best: DOMRect | null = null
-  let bestDist = Infinity
+function groupRectsByRow(rects: DOMRect[]): DOMRect[][] {
+  const buckets: { top: number; items: DOMRect[] }[] = []
   for (let i = 0; i < rects.length; i++) {
     const r = rects[i]
     if (!r) continue
-    const dx = r.left + r.width / 2 - pt.x
-    const dy = r.top + r.height / 2 - pt.y
-    const dist = dx * dx + dy * dy
-    if (dist < bestDist) {
-      bestDist = dist
-      best = r
+    let bucket = null as { top: number; items: DOMRect[] } | null
+    for (let j = 0; j < buckets.length; j++) {
+      const b = buckets[j]
+      if (b && Math.abs(b.top - r.top) <= Math.max(10, r.height * 0.6)) {
+        bucket = b
+        break
+      }
+    }
+    if (bucket) {
+      bucket.items.push(r)
+      bucket.top = Math.min(bucket.top, r.top)
+    } else {
+      buckets.push({ top: r.top, items: [r] })
     }
   }
-  return best
+  buckets.sort((a, b) => a.top - b.top)
+  return buckets.map((b) => b.items)
+}
+
+function unionRow(items: DOMRect[]): DOMRect | null {
+  return unionRects(items)
+}
+
+function expandContiguousRows(rows: DOMRect[][], startIndex: number): DOMRect[] {
+  const out: DOMRect[] = []
+  const rowUnion = (idx: number) => unionRow(rows[idx] || [])
+  let from = startIndex
+  let to = startIndex
+  while (from > 0) {
+    const cur = rowUnion(from)
+    const prev = rowUnion(from - 1)
+    if (!cur || !prev || cur.top - prev.bottom > 10) break
+    from -= 1
+  }
+  while (to < rows.length - 1) {
+    const cur = rowUnion(to)
+    const next = rowUnion(to + 1)
+    if (!cur || !next || next.top - cur.bottom > 10) break
+    to += 1
+  }
+  for (let i = from; i <= to; i++) {
+    const items = rows[i]
+    if (!items) continue
+    for (let j = 0; j < items.length; j++) {
+      const item = items[j]
+      if (item) out.push(item)
+    }
+  }
+  return out
+}
+
+/** 贴着真实选区顶边；不相邻的 Monaco 杂高亮不并进第一行 */
+function selectionToolbarRect(rects: DOMRect[]): DOMRect | null {
+  if (!rects.length) return null
+  const usable: DOMRect[] = []
+  for (let i = 0; i < rects.length; i++) {
+    const r = rects[i]
+    if (r && r.width >= 6 && r.height >= 8) usable.push(r)
+  }
+  const list = usable.length ? usable : rects
+  const rows = groupRectsByRow(list)
+  if (!rows.length) return unionRects(list)
+
+  const pt = activePointer()
+  let seed = 0
+  if (pt) {
+    let best = Infinity
+    for (let i = 0; i < rows.length; i++) {
+      const band = unionRow(rows[i] || [])
+      if (!band) continue
+      const dy = pt.y < band.top ? band.top - pt.y : pt.y > band.bottom ? pt.y - band.bottom : 0
+      if (dy < best) {
+        best = dy
+        seed = i
+      }
+    }
+  }
+
+  const cluster = expandContiguousRows(rows, seed)
+  const union = unionRects(cluster) || unionRow(rows[seed] || []) || unionRects(list)
+  if (!union) return null
+  const topBand = unionRow(rows[pt ? seed : 0] || []) || union
+  const tall = union.height > 40 && cluster.length > 1
+  if (tall) {
+    return createRect(union.left, union.top, union.width, Math.max(topBand.height, 14))
+  }
+  return createRect(union.left, union.top, union.width, Math.max(union.height, 14))
+}
+
+function pickRectNearPointer(rects: DOMRect[]): DOMRect | null {
+  return selectionToolbarRect(rects)
 }
 
 /** 仅框选落点时校正；滚动时不要跟鼠标 */
-function snapRectToPointer(rect: DOMRect | null): DOMRect | null {
-  if (!pinToolbarToPointer) return rect
+function monacoRowRectAtPointer(rects: DOMRect[]): DOMRect | null {
+  if (!rects.length) return null
   const pt = activePointer()
-  if (!rect) {
-    return pt ? createRect(pt.x - 12, pt.y - 10, 24, 20) : null
+  if (!pt) return selectionToolbarRect(rects)
+  let seed: DOMRect | null = null
+  let best = Infinity
+  for (let i = 0; i < rects.length; i++) {
+    const r = rects[i]
+    if (!r) continue
+    const dy = Math.abs(r.top + r.height / 2 - pt.y)
+    if (dy < best) {
+      best = dy
+      seed = r
+    }
   }
-  if (!pt) return rect
-  const cx = rect.left + rect.width / 2
-  const cy = rect.top + rect.height / 2
-  if (Math.abs(cy - pt.y) > 36 || Math.abs(cx - pt.x) > 280) {
-    const width = Math.min(Math.max(rect.width, 24), 160)
-    const height = Math.min(Math.max(rect.height, 16), 22)
-    return createRect(pt.x - width / 2, pt.y - height / 2, width, height)
+  if (!seed || best > 48) return pointerAnchorRect()
+  const row: DOMRect[] = []
+  for (let i = 0; i < rects.length; i++) {
+    const r = rects[i]
+    if (r && Math.abs(r.top - seed.top) <= Math.max(8, seed.height * 0.7)) row.push(r)
   }
-  return rect
+  return unionRects(row) || seed
 }
 
-/** 选区可见矩形：离指针最近的一块，而不是 getClientRects 的第一块 */
+/** 算出的锚点若离松手行太远，钉回选区所在行 */
+function stickAnchorToPointer(rect: DOMRect | null): DOMRect | null {
+  if (!rect) return pointerAnchorRect()
+  const pt = activePointer()
+  if (!pinToolbarToPointer || !pt) return rect
+  const looksLikeEditorChrome = rect.height > 80 && rect.width > 280
+  if (looksLikeEditorChrome) {
+    return createRect(pt.x - 40, pt.y - 10, 80, 20)
+  }
+  if (rect.height > 40 && pt.y >= rect.top - 8 && pt.y <= rect.bottom + 8) {
+    return rect
+  }
+  const cy = rect.top + Math.min(rect.height, 22) / 2
+  const cx = rect.left + rect.width / 2
+  const farY = Math.abs(cy - pt.y) > 24
+  const farX = Math.abs(cx - pt.x) > 120
+  if (!farY && !farX) return rect
+  const width = farX ? Math.min(Math.max(rect.width, 32), 120) : rect.width
+  const height = Math.min(Math.max(rect.height, 16), 22)
+  return createRect(
+    farX ? pt.x - width / 2 : rect.left,
+    farY ? pt.y - height / 2 : rect.top,
+    width,
+    height,
+  )
+}
+
+function snapRectToPointer(rect: DOMRect | null): DOMRect | null {
+  return stickAnchorToPointer(rect)
+}
+
+/** 选区矩形：大段用最上一行，短选区用紧框 */
 function firstVisibleRect(range: Range): DOMRect | null {
   try {
     const list = range.getClientRects ? range.getClientRects() : []
-    const near = pickRectNearPointer(rectsFromClientRectList(list))
+    const near = selectionToolbarRect(rectsFromClientRectList(list))
     if (near) return snapRectToPointer(near)
   } catch {
     // ignore
@@ -989,22 +1104,26 @@ function monacoSelectionAnchorRect(editorEl: Element, fallback?: DOMRect | null)
   const selected = editorEl.querySelectorAll
     ? editorEl.querySelectorAll('.selected-text, .inline-selected-text')
     : editorEl.getElementsByClassName('selected-text')
-  let rects = preferTightRects(rectsFromNodeList(selected))
+  let rects = rectsFromNodeList(selected)
+  const filtered: DOMRect[] = []
+  for (let i = 0; i < rects.length; i++) {
+    const r = rects[i]
+    if (r && r.width >= 8 && r.height >= 8 && !isAlmostEditorRect(r, editorEl)) filtered.push(r)
+  }
+  rects = filtered
   if (!rects.length) {
     const cslr = editorEl.querySelectorAll ? editorEl.querySelectorAll('.cslr') : []
-    const all = preferTightRects(rectsFromNodeList(cslr as ArrayLike<Element>))
+    const all = rectsFromNodeList(cslr as ArrayLike<Element>)
     rects = []
     for (let i = 0; i < all.length; i++) {
       const r = all[i]
-      if (r && !isAlmostEditorRect(r, editorEl)) rects.push(r)
+      if (r && r.width >= 8 && r.height >= 8 && !isAlmostEditorRect(r, editorEl)) rects.push(r)
     }
   }
-  const union = pickRectNearPointer(rects) || unionRects(rects)
-  if (union && !isAlmostEditorRect(union, editorEl)) {
-    return pinToolbarToPointer ? snapRectToPointer(union) : union
-  }
+  const union = monacoRowRectAtPointer(rects)
+  if (union) return stickAnchorToPointer(union)
   if (fallback && !isAlmostEditorRect(fallback, editorEl)) {
-    return pinToolbarToPointer ? snapRectToPointer(fallback) : fallback
+    return stickAnchorToPointer(fallback)
   }
   return pinToolbarToPointer ? pointerAnchorRect() : fallback || null
 }
@@ -1376,7 +1495,10 @@ function tightenPayloadRect(payload: SelectionAskPayload | null, host?: Element 
 }
 
 /** 挂到问答容器 rootRef 上，输出工具条位置与 selectedText */
-export function useSelectionAsk(rootRef: Ref<HTMLElement | null>) {
+export function useSelectionAsk(
+  rootRef: Ref<HTMLElement | null>,
+  viewportRef?: Ref<HTMLElement | null>,
+) {
   const visible = ref(false)
   const selectedText = ref('')
   const top = ref(0)
@@ -1536,11 +1658,7 @@ export function useSelectionAsk(rootRef: Ref<HTMLElement | null>) {
   function stableAnchorHost(payload: SelectionAskPayload): Element | null {
     const fromNode = monacoHostFromNode(payload.anchorNode) || monacoHostFromNode(payload.range?.commonAncestorContainer || null)
     if (fromNode) {
-      const lines =
-        fromNode.querySelector('.lines-content') ||
-        fromNode.querySelector('.view-lines') ||
-        fromNode.querySelector('.monaco-scrollable-element')
-      return lines || fromNode
+      return fromNode
     }
     const node = payload.range?.commonAncestorContainer ?? payload.anchorNode ?? null
     if (isElement(node)) return node
@@ -1573,45 +1691,59 @@ export function useSelectionAsk(rootRef: Ref<HTMLElement | null>) {
     return createRect(hr.left + locked.relLeft, hr.top + locked.relTop, locked.width, locked.height)
   }
 
+  function conversationViewportRect() {
+    const box = viewportRef?.value
+    if (box) return toDOMRect(box.getBoundingClientRect())
+    return viewportRect()
+  }
+
+  function toToolbarPos(clientX: number, clientY: number) {
+    const box = viewportRef?.value
+    if (!box) return { x: clientX, y: clientY }
+    const rect = box.getBoundingClientRect()
+    return {
+      x: clientX - rect.left + box.scrollLeft,
+      y: clientY - rect.top + box.scrollTop,
+    }
+  }
+
   /** 按选区矩形放工具条 */
   function place(payload: SelectionAskPayload) {
     const lockedRect = readLockedSelectionAnchor()
-    const anchor = lockedRect || visibleAnchorRect(payload)
+    let anchor = lockedRect || visibleAnchorRect(payload)
+    if (!lockedRect) anchor = stickAnchorToPointer(anchor)
     if (!anchor) {
       hideToolbarOnly()
       return
     }
     if (!lockedSelectionAnchor) lockSelectionAnchor(payload, anchor)
 
+    const view = conversationViewportRect()
+    if (anchor.bottom < view.top + 2 || anchor.top > view.bottom - 2) {
+      hideToolbarOnly()
+      return
+    }
+
     selectedText.value = payload.text
     const toolbarEl = toolbarRef.value
     const toolbarWidth = toolbarEl?.offsetWidth ?? 140
     const toolbarHeight = toolbarEl?.offsetHeight ?? 40
     const gap = 8
-    const clipHost = lockedSelectionAnchor?.host || payload.range?.commonAncestorContainer || payload.anchorNode || null
-    const clip = getClipRect(clipHost)
-    const spaceAbove = anchor.top - clip.top
-    const spaceBelow = clip.bottom - anchor.bottom
+    const spaceAbove = anchor.top - view.top
     const canPlaceAbove = spaceAbove >= toolbarHeight + gap
-    const canPlaceBelow = spaceBelow >= toolbarHeight + gap
 
+    let clientTop: number
     if (canPlaceAbove) {
-      top.value = anchor.top - gap
-    } else if (canPlaceBelow) {
-      top.value = anchor.bottom + toolbarHeight + gap
+      clientTop = anchor.top - gap
     } else {
-      top.value = Math.min(
-        Math.max(anchor.top + toolbarHeight + gap, clip.top + toolbarHeight + gap),
-        clip.bottom - gap,
-      )
+      clientTop = anchor.top + Math.max(anchor.height, 16) + toolbarHeight + gap
+      if (clientTop > view.bottom - 4) clientTop = Math.min(anchor.top - gap, view.bottom - 4)
     }
 
-    const minLeft = clip.left + toolbarWidth / 2 + 4
-    const maxLeft = clip.right - toolbarWidth / 2 - 4
-    left.value = Math.min(
-      Math.max(anchor.left + anchor.width / 2, minLeft),
-      Math.max(minLeft, maxLeft),
-    )
+    const clientLeft = anchor.left + anchor.width / 2
+    const pos = toToolbarPos(clientLeft, clientTop)
+    top.value = pos.y
+    left.value = pos.x
     visible.value = true
     pinToolbarToPointer = false
   }

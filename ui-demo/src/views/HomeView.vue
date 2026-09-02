@@ -1,56 +1,60 @@
 <template>
-  <div class="wrapper">
-    <!-- useSource="mobile" -->
-     <div class="main" ref="selectionRootRef">
-      <CkcAnswer 
-        ref="ckcAnswerRef"
-        :messages="messages"  
-        :historyMessages="historyMessages"
-        render-custom-id="docs" 
-        :custom-html-tags="['custom-data']"
-        @click-recomendation="recomendationAsk"
-        :markdown-component="MarkdownRender"
-        @click-document="documentClick">
-        <template #confirm="confirmProps">
-          {{ confirmProps.confirmInfo }}
-          <button @click="alterMessages(confirmProps)">确认信息</button>
-        </template>
-        <template #taskList="taskListProps">
-          {{ taskListProps.taskListInfo }}
-        </template>
-        <template #actions="actionsProps">
-          <button @click="alterMessages(actionsProps)">清空消息</button>
-        </template>
-      </CkcAnswer>
-     </div>
-
-     <Teleport to="body">
-      <div
-        v-show="selectionVisible"
-        ref="selectionToolbarRef"
-        class="selection-ask-toolbar"
-        :style="{ top: `${selectionTop}px`, left: `${selectionLeft}px` }"
-        @mousedown.prevent
-        @pointerdown.prevent
-        @pointerup.prevent
-      >
-        <button type="button" class="selection-ask-toolbar__btn" @click="addSelectionToDialogue">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path d="M7 7h5v5H9.5A2.5 2.5 0 0 1 7 9.5V7Zm8 0h5v5h-2.5A2.5 2.5 0 0 1 15 9.5V7Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
-          </svg>
-          添加至对话
-        </button>
-      </div>
-     </Teleport>
-
-    <!-- <button @click="stopChat()">清空消息</button> -->
-  </div>
-  <div
-    ref="dialogueInputRef"
-    style="width: 100%;height: 20px;background-color: red;"
-    contenteditable="true"
-    class="selection-ask-container"
-  ></div>
+  <section style="width: 100%;height: 100vh;display: flex;flex-direction: column;overflow: hidden;">
+    <div style="width: 100%;height: 50px;flex-shrink: 0;background-color: pink;">
+      header
+    </div>
+    <div class="wrapper" ref="selectionViewportRef">
+      <!-- useSource="mobile" -->
+       <div class="main" ref="selectionRootRef">
+        <CkcAnswer 
+          ref="ckcAnswerRef"
+          :messages="messages"  
+          :historyMessages="historyMessages"
+          render-custom-id="docs" 
+          :custom-html-tags="['custom-data']"
+          @click-recomendation="recomendationAsk"
+          :markdown-component="MarkdownRender"
+          @click-document="documentClick">
+          <template #confirm="confirmProps">
+            {{ confirmProps.confirmInfo }}
+            <button @click="alterMessages(confirmProps)">确认信息</button>
+          </template>
+          <template #taskList="taskListProps">
+            {{ taskListProps.taskListInfo }}
+          </template>
+          <template #actions="actionsProps">
+            <button @click="alterMessages(actionsProps)">清空消息</button>
+          </template>
+        </CkcAnswer>
+       </div>
+       
+            <Teleport v-if="selectionViewportRef" :to="selectionViewportRef">
+             <div
+               v-show="selectionVisible"
+               ref="selectionToolbarRef"
+               class="selection-ask-toolbar"
+               :style="{ top: `${selectionTop}px`, left: `${selectionLeft}px` }"
+               @mousedown.prevent
+               @pointerdown.prevent
+               @pointerup.prevent
+             >
+               <button type="button" class="selection-ask-toolbar__btn" @click="addSelectionToDialogue">
+                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                   <path d="M7 7h5v5H9.5A2.5 2.5 0 0 1 7 9.5V7Zm8 0h5v5h-2.5A2.5 2.5 0 0 1 15 9.5V7Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+                 </svg>
+                 添加至对话
+               </button>
+             </div>
+            </Teleport>
+      <!-- <button @click="stopChat()">清空消息</button> -->
+    </div>
+    <div
+      ref="dialogueInputRef"
+      style="width: 100%;height: 50px;flex-shrink: 0;background-color: red;"
+      contenteditable="true"
+      class="selection-ask-container"
+    ></div>
+  </section>
 </template>
 
 <script setup lang="ts">
@@ -95,6 +99,7 @@
   })
   const ckcAnswerRef = ref<InstanceType<typeof CkcAnswer> | null>(null)
   const selectionRootRef = ref<HTMLElement | null>(null)
+  const selectionViewportRef = ref<HTMLElement | null>(null)
   const dialogueInputRef = ref<HTMLElement | null>(null)
   const {
     visible: selectionVisible,
@@ -103,7 +108,7 @@
     left: selectionLeft,
     toolbarRef: selectionToolbarRef,
     hide: hideSelectionToolbar,
-  } = useSelectionAsk(selectionRootRef)
+  } = useSelectionAsk(selectionRootRef, selectionViewportRef)
   const messages = ref<Message[]>([]);
   const historyMessages = ref<Message[]>([]);
   function alterMessages(actionsProps: any) {
@@ -159,15 +164,19 @@
 
 <style>
   .wrapper {
+    position: relative;
+    flex: 1;
+    min-height: 0;
     display: flex;
     justify-content: center;
     background-color: burlywood;
+    overflow: auto;
   }
   .main {
     width: 800px;
   }
   .selection-ask-toolbar {
-    position: fixed;
+    position: absolute;
     z-index: 10000;
     pointer-events: auto;
     transform: translate(-50%, -100%);

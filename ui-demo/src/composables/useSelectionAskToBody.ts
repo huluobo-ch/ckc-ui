@@ -396,22 +396,59 @@ function pickRectNearPointer(rects: DOMRect[]): DOMRect | null {
 }
 
 /** 仅框选落点时校正；滚动时不要跟鼠标 */
-function snapRectToPointer(rect: DOMRect | null): DOMRect | null {
-  if (!pinToolbarToPointer) return rect
-  if (rect && rect.height > 36) return rect
+function monacoRowRectAtPointer(rects: DOMRect[]): DOMRect | null {
+  if (!rects.length) return null
   const pt = activePointer()
-  if (!rect) {
-    return pt ? createRect(pt.x - 12, pt.y - 10, 24, 20) : null
+  if (!pt) return selectionToolbarRect(rects)
+  let seed: DOMRect | null = null
+  let best = Infinity
+  for (let i = 0; i < rects.length; i++) {
+    const r = rects[i]
+    if (!r) continue
+    const dy = Math.abs(r.top + r.height / 2 - pt.y)
+    if (dy < best) {
+      best = dy
+      seed = r
+    }
   }
-  if (!pt) return rect
+  if (!seed || best > 48) return pointerAnchorRect()
+  const row: DOMRect[] = []
+  for (let i = 0; i < rects.length; i++) {
+    const r = rects[i]
+    if (r && Math.abs(r.top - seed.top) <= Math.max(8, seed.height * 0.7)) row.push(r)
+  }
+  return unionRects(row) || seed
+}
+
+/** 算出的锚点若离松手行太远，钉回选区所在行 */
+function stickAnchorToPointer(rect: DOMRect | null): DOMRect | null {
+  if (!rect) return pointerAnchorRect()
+  const pt = activePointer()
+  if (!pinToolbarToPointer || !pt) return rect
+  const looksLikeEditorChrome = rect.height > 80 && rect.width > 280
+  if (looksLikeEditorChrome) {
+    return createRect(pt.x - 40, pt.y - 10, 80, 20)
+  }
+  if (rect.height > 40 && pt.y >= rect.top - 8 && pt.y <= rect.bottom + 8) {
+    return rect
+  }
+  const cy = rect.top + Math.min(rect.height, 22) / 2
   const cx = rect.left + rect.width / 2
-  const cy = rect.top + rect.height / 2
-  if (Math.abs(cy - pt.y) > 36 || Math.abs(cx - pt.x) > 280) {
-    const width = Math.min(Math.max(rect.width, 24), 160)
-    const height = Math.min(Math.max(rect.height, 16), 22)
-    return createRect(pt.x - width / 2, pt.y - height / 2, width, height)
-  }
-  return rect
+  const farY = Math.abs(cy - pt.y) > 24
+  const farX = Math.abs(cx - pt.x) > 120
+  if (!farY && !farX) return rect
+  const width = farX ? Math.min(Math.max(rect.width, 32), 120) : rect.width
+  const height = Math.min(Math.max(rect.height, 16), 22)
+  return createRect(
+    farX ? pt.x - width / 2 : rect.left,
+    farY ? pt.y - height / 2 : rect.top,
+    width,
+    height,
+  )
+}
+
+function snapRectToPointer(rect: DOMRect | null): DOMRect | null {
+  return stickAnchorToPointer(rect)
 }
 
 /** 选区矩形：大段用最上一行，短选区用紧框 */
@@ -1083,10 +1120,10 @@ function monacoSelectionAnchorRect(editorEl: Element, fallback?: DOMRect | null)
       if (r && r.width >= 8 && r.height >= 8 && !isAlmostEditorRect(r, editorEl)) rects.push(r)
     }
   }
-  const union = selectionToolbarRect(rects)
-  if (union) return union
+  const union = monacoRowRectAtPointer(rects)
+  if (union) return stickAnchorToPointer(union)
   if (fallback && !isAlmostEditorRect(fallback, editorEl)) {
-    return selectionToolbarRect([fallback]) || fallback
+    return stickAnchorToPointer(fallback)
   }
   return pinToolbarToPointer ? pointerAnchorRect() : fallback || null
 }
@@ -1621,11 +1658,7 @@ export function useSelectionAsk(
   function stableAnchorHost(payload: SelectionAskPayload): Element | null {
     const fromNode = monacoHostFromNode(payload.anchorNode) || monacoHostFromNode(payload.range?.commonAncestorContainer || null)
     if (fromNode) {
-      const lines =
-        fromNode.querySelector('.lines-content') ||
-        fromNode.querySelector('.view-lines') ||
-        fromNode.querySelector('.monaco-scrollable-element')
-      return lines || fromNode
+      return fromNode
     }
     const node = payload.range?.commonAncestorContainer ?? payload.anchorNode ?? null
     if (isElement(node)) return node
@@ -1677,7 +1710,8 @@ export function useSelectionAsk(
   /** 按选区矩形放工具条 */
   function place(payload: SelectionAskPayload) {
     const lockedRect = readLockedSelectionAnchor()
-    const anchor = lockedRect || visibleAnchorRect(payload)
+    let anchor = lockedRect || visibleAnchorRect(payload)
+    if (!lockedRect) anchor = stickAnchorToPointer(anchor)
     if (!anchor) {
       hideToolbarOnly()
       return

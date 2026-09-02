@@ -27,27 +27,27 @@
           </template>
         </CkcAnswer>
        </div>
-       
-            <Teleport v-if="selectionViewportRef" :to="selectionViewportRef">
-             <div
-               v-show="selectionVisible"
-               ref="selectionToolbarRef"
-               class="selection-ask-toolbar"
-               :style="{ top: `${selectionTop}px`, left: `${selectionLeft}px` }"
-               @mousedown.prevent
-               @pointerdown.prevent
-               @pointerup.prevent
-             >
-               <button type="button" class="selection-ask-toolbar__btn" @click="addSelectionToDialogue">
-                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                   <path d="M7 7h5v5H9.5A2.5 2.5 0 0 1 7 9.5V7Zm8 0h5v5h-2.5A2.5 2.5 0 0 1 15 9.5V7Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
-                 </svg>
-                 添加至对话
-               </button>
-             </div>
-            </Teleport>
-      <!-- <button @click="stopChat()">清空消息</button> -->
-    </div>
+  
+      </div>
+      <Teleport to="body">
+       <div
+         v-show="selectionVisible"
+         ref="selectionToolbarRef"
+         class="selection-ask-toolbar"
+         :style="{ top: `${selectionTop}px`, left: `${selectionLeft}px` }"
+         @mousedown.prevent
+         @pointerdown.prevent
+         @pointerup.prevent
+       >
+         <button type="button" class="selection-ask-toolbar__btn" @click="addSelectionToDialogue">
+           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+             <path d="M7 7h5v5H9.5A2.5 2.5 0 0 1 7 9.5V7Zm8 0h5v5h-2.5A2.5 2.5 0 0 1 15 9.5V7Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+           </svg>
+           添加至对话
+         </button>
+       </div>
+      </Teleport>
+     <!-- <button @click="stopChat()">清空消息</button> -->
     <div
       ref="dialogueInputRef"
       style="width: 100%;height: 50px;flex-shrink: 0;background-color: red;"
@@ -66,7 +66,7 @@
   import { message } from '../const/mock-data/message-file';
   import { setCustomComponents, MarkdownCodeBlockNode, CodeBlockNode } from 'markstream-vue';
   import { MarkdownRender } from 'markstream-vue';
-  import { useSelectionAsk } from '../composables/useSelectionAsk';
+  import { useSelectionAsk } from '../composables/useSelectionAskToBody';
   // import CustomComp from '../components/customComp.vue';
 
   const cardEmitter = mitt();
@@ -98,8 +98,8 @@
     'code_block': CodeBlockNode
   })
   const ckcAnswerRef = ref<InstanceType<typeof CkcAnswer> | null>(null)
-  const selectionRootRef = ref<HTMLElement | null>(null)
   const selectionViewportRef = ref<HTMLElement | null>(null)
+  // const selectionViewportRef = ref<HTMLElement | null>(null)
   const dialogueInputRef = ref<HTMLElement | null>(null)
   const {
     visible: selectionVisible,
@@ -108,7 +108,7 @@
     left: selectionLeft,
     toolbarRef: selectionToolbarRef,
     hide: hideSelectionToolbar,
-  } = useSelectionAsk(selectionRootRef, selectionViewportRef)
+  } = useSelectionAsk(selectionViewportRef)
   const messages = ref<Message[]>([]);
   const historyMessages = ref<Message[]>([]);
   function alterMessages(actionsProps: any) {

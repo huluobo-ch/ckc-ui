@@ -54,9 +54,19 @@ type CaretPositionFromPoint = (
 ) => CaretPoint | null
 
 function isInsideRoot(root: HTMLElement, node: Node | null): boolean {
-  if (!node) return false
-  const el = node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement
-  return !!(el && (root.contains(el) || root === el))
+  let current: Node | null = node
+  while (current) {
+    if (current === root) return true
+    if (current instanceof ShadowRoot) {
+      current = current.host
+      continue
+    }
+    if (current instanceof Element && (root === current || root.contains(current))) {
+      return true
+    }
+    current = current.parentNode
+  }
+  return false
 }
 
 function isDiffsSurface(node: EventTarget | null): boolean {
@@ -331,12 +341,37 @@ function getMonacoEditors(root: HTMLElement): MonacoLikeEditor[] {
   return editors
 }
 
+function firstMonacoOverlayRect(editorEl: Element): DOMRect | null {
+  const nodes = editorEl.querySelectorAll('.selected-text, .inline-selected-text')
+  for (const node of nodes) {
+    const rect = node.getBoundingClientRect()
+    if (rect.width > 1 && rect.height > 1) return rect
+  }
+  return null
+}
+
+function getMonacoTextareaSelection(root: HTMLElement): SelectionAskPayload | null {
+  const areas = root.querySelectorAll<HTMLTextAreaElement>('.monaco-editor textarea.inputarea')
+  for (const area of areas) {
+    if (!root.contains(area)) continue
+    const start = area.selectionStart ?? 0
+    const end = area.selectionEnd ?? 0
+    if (end <= start) continue
+    const text = area.value.slice(start, end)
+    if (!text.trim()) continue
+    const editorEl = area.closest('.monaco-editor')
+    const rect = (editorEl && firstMonacoOverlayRect(editorEl)) || area.getBoundingClientRect()
+    return { text, rect, anchorNode: area }
+  }
+  return null
+}
+
 function getMonacoSelection(root: HTMLElement): SelectionAskPayload | null {
   for (const editor of getMonacoEditors(root)) {
     const payload = payloadFromMonacoEditor(root, editor)
     if (payload) return payload
   }
-  return null
+  return getMonacoTextareaSelection(root)
 }
 
 function collapseMonacoSelection(root: HTMLElement) {
@@ -361,21 +396,51 @@ function collapseMonacoSelection(root: HTMLElement) {
   }
 }
 
+function isSelectionInsideRoot(root: HTMLElement, selection: Selection | null): boolean {
+  if (!selection || selection.rangeCount === 0) return false
+  const node = selection.getRangeAt(0).commonAncestorContainer
+  return isInsideRoot(root, node) || isInCollectedShadow(node, root)
+}
+
 function clearBrowserSelection(root: HTMLElement | null) {
-  window.getSelection()?.removeAllRanges()
   if (!root) return
+  const selection = window.getSelection()
+  if (isSelectionInsideRoot(root, selection)) {
+    selection?.removeAllRanges()
+  }
   for (const shadow of collectShadowRoots(root)) {
     ;(shadow as ShadowRoot & { getSelection?: () => Selection | null }).getSelection?.()?.removeAllRanges()
   }
   collapseMonacoSelection(root)
 }
 
-function readLiveSelection(root: HTMLElement): SelectionAskPayload | null {
+function getComposedSelectionFromEvent(root: HTMLElement, event: Event): SelectionAskPayload | null {
+  const selection = window.getSelection() as ComposedSelection | null
+  if (!selection?.getComposedRanges) return null
+  const shadows = [...new Set([...shadowsFromEvent(event), ...collectShadowRoots(root)])]
+  try {
+    const ranges = selection.getComposedRanges({ shadowRoots: shadows })
+    for (const staticRange of ranges) {
+      if (staticRange.collapsed) continue
+      const range = document.createRange()
+      range.setStart(staticRange.startContainer, staticRange.startOffset)
+      range.setEnd(staticRange.endContainer, staticRange.endOffset)
+      const payload = payloadFromRange(range, root)
+      if (payload) return payload
+    }
+  } catch {
+    return null
+  }
+  return null
+}
+
+function readLiveSelection(root: HTMLElement, event?: Event): SelectionAskPayload | null {
   return (
     getNativeSelection(root) ||
     getShadowRootSelection(root) ||
     getComposedSelection(root) ||
-    getMonacoSelection(root)
+    getMonacoSelection(root) ||
+    (event ? getComposedSelectionFromEvent(root, event) : null)
   )
 }
 
@@ -390,20 +455,99 @@ export function useSelectionAsk(rootRef: Ref<HTMLElement | null>) {
   let streamDiffsDrag: StreamDiffsDrag | null = null
   let streamDiffsPayload: SelectionAskPayload | null = null
 
+  let skipNextSync = false
+  let lastGestureWasDrag = false
+  let showTimer = 0
   let scrollRaf = 0
+  let gesture: {
+    startX: number
+    startY: number
+    onToolbarEl: boolean
+    overToolbarRect: boolean
+    inRoot: boolean
+    hadToolbar: boolean
+  } | null = null
 
-  function isEventOnToolbar(event: Event) {
+  const CLICK_SLOP = 6
+  const SHOW_DELAY = 320
+
+  function cancelShowTimer() {
+    if (!showTimer) return
+    window.clearTimeout(showTimer)
+    showTimer = 0
+  }
+
+  function scheduleShow(payload: SelectionAskPayload, immediate = false) {
+    cachedPayload = payload
+    if (immediate || visible.value) {
+      cancelShowTimer()
+      place(payload)
+      return
+    }
+    cancelShowTimer()
+    showTimer = window.setTimeout(() => {
+      showTimer = 0
+      if (cachedPayload) place(cachedPayload)
+    }, SHOW_DELAY)
+  }
+
+  function isPointOverToolbar(event: Event) {
     const toolbar = toolbarRef.value
-    if (!toolbar) return false
+    if (!toolbar || !visible.value) return false
+    if (!('clientX' in event) || typeof (event as MouseEvent).clientX !== 'number') return false
+    const rect = toolbar.getBoundingClientRect()
+    const x = (event as MouseEvent).clientX
+    const y = (event as MouseEvent).clientY
+    return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
+  }
+
+  function isEventOnToolbarEl(event: Event) {
+    const toolbar = toolbarRef.value
+    if (!toolbar || !visible.value) return false
     return event.composedPath().includes(toolbar)
   }
 
-  function hide() {
+  function gestureDistance(event: { clientX: number; clientY: number }) {
+    if (!gesture) return 0
+    return Math.hypot(event.clientX - gesture.startX, event.clientY - gesture.startY)
+  }
+
+  function releasePointerCaptures(event: PointerEvent) {
+    for (const node of event.composedPath()) {
+      if (node instanceof Element && node.hasPointerCapture?.(event.pointerId)) {
+        node.releasePointerCapture(event.pointerId)
+      }
+    }
+  }
+
+  function triggerToolbarButtonClick() {
+    toolbarRef.value?.querySelector('button')?.click()
+  }
+
+  function isEventInRoot(event: Event) {
+    const root = rootRef.value
+    if (!root) return false
+    return event.composedPath().includes(root)
+  }
+
+  function isFocusInRoot() {
+    const root = rootRef.value
+    const active = document.activeElement
+    return !!(root && active && (root === active || root.contains(active)))
+  }
+
+  function dismissToolbarKeepSelection() {
+    cancelShowTimer()
     visible.value = false
     selectedText.value = ''
     cachedPayload = null
     streamDiffsPayload = null
     streamDiffsDrag = null
+  }
+
+  function hide() {
+    skipNextSync = true
+    dismissToolbarKeepSelection()
     clearBrowserSelection(rootRef.value)
   }
 
@@ -449,18 +593,17 @@ export function useSelectionAsk(rootRef: Ref<HTMLElement | null>) {
     visible.value = true
   }
 
-  function syncFromSelection() {
+  function syncFromSelection(event?: Event, immediate = false) {
     const root = rootRef.value
     if (!root) {
-      hide()
+      dismissToolbarKeepSelection()
       return
     }
-    const payload = readLiveSelection(root) || streamDiffsPayload || cachedPayload
+    const payload = readLiveSelection(root, event) || streamDiffsPayload || cachedPayload
     if (payload) {
-      cachedPayload = payload
-      place(payload)
+      scheduleShow(payload, immediate)
     } else {
-      hide()
+      dismissToolbarKeepSelection()
     }
   }
 
@@ -477,9 +620,21 @@ export function useSelectionAsk(rootRef: Ref<HTMLElement | null>) {
   }
 
   function onSelectEnd(event: Event) {
-    if (isEventOnToolbar(event)) return
+    if (skipNextSync) {
+      skipNextSync = false
+      return
+    }
+    if (isEventOnToolbarEl(event)) return
+    if (!isEventInRoot(event)) {
+      if (visible.value || cachedPayload || streamDiffsPayload) {
+        hide()
+      }
+      return
+    }
+    syncFromSelection(event, lastGestureWasDrag)
     requestAnimationFrame(() => {
-      requestAnimationFrame(() => syncFromSelection())
+      if (skipNextSync) return
+      syncFromSelection(event, lastGestureWasDrag)
     })
   }
 
@@ -492,11 +647,12 @@ export function useSelectionAsk(rootRef: Ref<HTMLElement | null>) {
 
   function onKeyUp(event: KeyboardEvent) {
     if (event.key === 'Escape') {
-      hide()
+      if (visible.value || cachedPayload || streamDiffsPayload) hide()
       return
     }
+    if (!isEventInRoot(event) && !isFocusInRoot()) return
     if (event.shiftKey || event.key.startsWith('Arrow')) {
-      requestAnimationFrame(() => syncFromSelection())
+      requestAnimationFrame(() => syncFromSelection(undefined, true))
     }
   }
 
@@ -509,10 +665,35 @@ export function useSelectionAsk(rootRef: Ref<HTMLElement | null>) {
   }
 
   function onPointerDown(event: PointerEvent) {
-    if (isEventOnToolbar(event)) return
+    const isMultiClick = event.detail >= 2
+    if (!isMultiClick) skipNextSync = false
+    const inRoot = isEventInRoot(event)
+    const onToolbarEl = isEventOnToolbarEl(event)
+    const overToolbarRect = isPointOverToolbar(event)
 
-    if (visible.value || cachedPayload || streamDiffsPayload) {
-      hide()
+    gesture = {
+      startX: event.clientX,
+      startY: event.clientY,
+      onToolbarEl: onToolbarEl && !isMultiClick,
+      overToolbarRect: overToolbarRect && !isMultiClick,
+      inRoot,
+      hadToolbar: visible.value,
+    }
+
+    if (onToolbarEl && !isMultiClick) {
+      releasePointerCaptures(event)
+      skipNextSync = true
+      return
+    }
+
+    if (overToolbarRect && !isMultiClick) {
+      releasePointerCaptures(event)
+    }
+
+    if (!inRoot) {
+      if (visible.value || cachedPayload || streamDiffsPayload) hide()
+      streamDiffsDrag = null
+      return
     }
 
     const path = event.composedPath()
@@ -529,11 +710,48 @@ export function useSelectionAsk(rootRef: Ref<HTMLElement | null>) {
     streamDiffsDrag = null
   }
 
+  function onPointerMove(event: PointerEvent) {
+    if (!gesture || gesture.onToolbarEl) return
+    if (gestureDistance(event) < CLICK_SLOP) return
+    if (visible.value) dismissToolbarKeepSelection()
+  }
+
   function onPointerUp(event: PointerEvent) {
+    const current = gesture
+    gesture = null
+    const dist = current ? Math.hypot(event.clientX - current.startX, event.clientY - current.startY) : 0
+    const isClick = dist < CLICK_SLOP
+    const isMultiClick = event.detail >= 2
+    lastGestureWasDrag = !isClick
+
+    if (current?.onToolbarEl && !isMultiClick) {
+      skipNextSync = true
+      return
+    }
+
+    if (current?.overToolbarRect && isClick && !isMultiClick) {
+      skipNextSync = true
+      releasePointerCaptures(event)
+      event.preventDefault()
+      event.stopPropagation()
+      triggerToolbarButtonClick()
+      return
+    }
+
+    if (current?.inRoot && isClick && current.hadToolbar && !isMultiClick) {
+      hide()
+      return
+    }
+
     const root = rootRef.value
     if (!root) return
+    if (isEventOnToolbarEl(event)) return
+    if (!isEventInRoot(event)) {
+      streamDiffsDrag = null
+      return
+    }
 
-    const live = readLiveSelection(root)
+    const live = readLiveSelection(root, event)
     if (live) {
       cachedPayload = live
       streamDiffsPayload = live
@@ -561,6 +779,7 @@ export function useSelectionAsk(rootRef: Ref<HTMLElement | null>) {
     document.addEventListener('keyup', onKeyUp)
     document.addEventListener('selectionchange', onSelectionChange)
     document.addEventListener('pointerdown', onPointerDown, true)
+    document.addEventListener('pointermove', onPointerMove, true)
     document.addEventListener('pointerup', onPointerUp, true)
     window.addEventListener('scroll', onScrollOrResize, true)
     window.addEventListener('resize', onScrollOrResize)
@@ -572,10 +791,12 @@ export function useSelectionAsk(rootRef: Ref<HTMLElement | null>) {
     document.removeEventListener('keyup', onKeyUp)
     document.removeEventListener('selectionchange', onSelectionChange)
     document.removeEventListener('pointerdown', onPointerDown, true)
+    document.removeEventListener('pointermove', onPointerMove, true)
     document.removeEventListener('pointerup', onPointerUp, true)
     window.removeEventListener('scroll', onScrollOrResize, true)
     window.removeEventListener('resize', onScrollOrResize)
     if (scrollRaf) window.cancelAnimationFrame(scrollRaf)
+    cancelShowTimer()
   })
 
   return {

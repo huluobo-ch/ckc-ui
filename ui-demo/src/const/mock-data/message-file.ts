@@ -1482,6 +1482,24 @@ export const message = [
     "type": "answer",
     "traceId": "traceId_Ip-blV",
     "sessionId": "lipeipei-013_SYS03200057_20260723093103209",
+    "content": "文件卡片 JSON 示例：\n\n```json\n{\n  \"type\": \"fileinfo\",\n  \"filename\": \"测试文档.docx\",\n  \"url\": \"/center/ckeApi/api/tools/file/download?fileId=8a4ef58a-cf99-41d8-8722-4615b6a1bb2f\"\n}\n```\n\n",
+    "conversation_id": "lipeipei-013_SYS03200057_20260723093103209",
+    "created_at": 1784770621080,
+    "position": 0
+  },
+  {
+    "type": "answer",
+    "traceId": "traceId_Ip-blV",
+    "sessionId": "lipeipei-013_SYS03200057_20260723093103209",
+    "content": "Markdown 说明示例：\n\n```markdown\n# 测试文档说明\n\n- 已生成 Word 文档并上传 OSS\n- 文件名：`测试文档.docx`\n\n下载地址：\n\n/center/ckeApi/api/tools/file/download?fileId=8a4ef58a-cf99-41d8-8722-4615b6a1bb2f\n```\n\n",
+    "conversation_id": "lipeipei-013_SYS03200057_20260723093103209",
+    "created_at": 1784770621110,
+    "position": 0
+  },
+  {
+    "type": "answer",
+    "traceId": "traceId_Ip-blV",
+    "sessionId": "lipeipei-013_SYS03200057_20260723093103209",
     "content": "输出产物：\n<custom-data>{\"type",
     "conversation_id": "lipeipei-013_SYS03200057_20260723093103209",
     "created_at": 1784770621156,
@@ -2316,7 +2334,7 @@ export const message = [
     "type": "end",
     "traceId": "traceId_Ip-blV",
     "sessionId": "lipeipei-013_SYS03200057_20260723093103209",
-    "content": "[{\"thinking\":\"太好了！文件上传成功。返回的 URL 是：\\n/center/ckeApi/api/tools/file/download?fileId=8a4ef58a-cf99-41d8-8722-4615b6a1bb2f\\n\\n现在我需要按照技能文档的要求，输出文件卡片格式：\\n```json\\n{\\n  \\\"type\\\": \\\"fileinfo\\\",\\n  \\\"filename\\\": \\\"测试文档.docx\\\",\\n  \\\"url\\\": \\\"/center/ckeApi/api/tools/file/download?fileId=8a4ef58a-cf99-41d8-8722-4615b6a1bb2f\\\"\\n}\\n```\\n\\n根据文档，我需要以特定的格式输出：\\n```text\\n输出产物：\\n<custom-data>{\\\"type\\\":\\\"fileinfo\\\",\\\"filename\\\":\\\"测试文档.docx\\\",\\\"url\\\":\\\"/center/ckeApi/api/tools/file/download?fileId=8a4ef58a-cf99-41d8-8722-4615b6a1bb2f\\\"}</custom-data>\\n```\"},{\"text\":\"完美！Word 测试文档已成功生成并上传到 OSS。\\n\\n输出产物：\\n<custom-data>{\\\"type\\\":\\\"fileinfo\\\",\\\"filename\\\":\\\"测试文档.docx\\\",\\\"url\\\":\\\"/center/ckeApi/api/tools/file/download?fileId=8a4ef58a-cf99-41d8-8722-4615b6a1bb2f\\\"}</custom-data>\\n\\n文档包含以下测试内容：\\n- ✅ 标题和副标题（含格式化）\\n- ✅ 多级标题（Heading 1）\\n- ✅ 无序列表（项目符号列表）\\n- ✅ 有序列表（编号列表）\\n- ✅ 表格（3列3行，含表头和样式）\\n- ✅ 格式化文本（粗体、斜体、下划线、删除线、彩色文字）\\n- ✅ 段落和对齐方式\\n\\n您可以点击上方文件卡片下载并查看测试文档！\"}]",
+    "content": "[{\"thinking\":\"太好了！文件上传成功。返回的 URL 是：\\n/center/ckeApi/api/tools/file/download?fileId=8a4ef58a-cf99-41d8-8722-4615b6a1bb2f\\n\\n现在我需要按照技能文档的要求，输出文件卡片格式：\\n```json\\n{\\n  \\\"type\\\": \\\"fileinfo\\\",\\n  \\\"filename\\\": \\\"测试文档.docx\\\",\\n  \\\"url\\\": \\\"/center/ckeApi/api/tools/file/download?fileId=8a4ef58a-cf99-41d8-8722-4615b6a1bb2f\\\"\\n}\\n```\\n\\n根据文档，我需要以特定的格式输出：\\n```text\\n输出产物：\\n<custom-data>{\\\"type\\\":\\\"fileinfo\\\",\\\"filename\\\":\\\"测试文档.docx\\\",\\\"url\\\":\\\"/center/ckeApi/api/tools/file/download?fileId=8a4ef58a-cf99-41d8-8722-4615b6a1bb2f\\\"}</custom-data>\\n```\"},{\"text\":\"完美！Word 测试文档已成功生成并上传到 OSS。\\n\\n文件卡片 JSON 示例：\\n\\n```json\\n{\\n  \\\"type\\\": \\\"fileinfo\\\",\\n  \\\"filename\\\": \\\"测试文档.docx\\\",\\n  \\\"url\\\": \\\"/center/ckeApi/api/tools/file/download?fileId=8a4ef58a-cf99-41d8-8722-4615b6a1bb2f\\\"\\n}\\n```\\n\\nMarkdown 说明示例：\\n\\n```markdown\\n# 测试文档说明\\n\\n- 已生成 Word 文档并上传 OSS\\n- 文件名：`测试文档.docx`\\n\\n下载地址：\\n\\n/center/ckeApi/api/tools/file/download?fileId=8a4ef58a-cf99-41d8-8722-4615b6a1bb2f\\n```\\n\\n输出产物：\\n<custom-data>{\\\"type\\\":\\\"fileinfo\\\",\\\"filename\\\":\\\"测试文档.docx\\\",\\\"url\\\":\\\"/center/ckeApi/api/tools/file/download?fileId=8a4ef58a-cf99-41d8-8722-4615b6a1bb2f\\\"}</custom-data>\\n\\n文档包含以下测试内容：\\n- ✅ 标题和副标题（含格式化）\\n- ✅ 多级标题（Heading 1）\\n- ✅ 无序列表（项目符号列表）\\n- ✅ 有序列表（编号列表）\\n- ✅ 表格（3列3行，含表头和样式）\\n- ✅ 格式化文本（粗体、斜体、下划线、删除线、彩色文字）\\n- ✅ 段落和对齐方式\\n\\n您可以点击上方文件卡片下载并查看测试文档！\"}]",
     "conversation_id": "lipeipei-013_SYS03200057_20260723093103209",
     "created_at": 0,
     "position": 0

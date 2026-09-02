@@ -31,6 +31,8 @@
         class="selection-ask-toolbar"
         :style="{ top: `${selectionTop}px`, left: `${selectionLeft}px` }"
         @mousedown.prevent
+        @pointerdown.prevent
+        @pointerup.prevent
       >
         <button type="button" class="selection-ask-toolbar__btn" @click="addSelectionToDialogue">
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -43,6 +45,12 @@
 
     <!-- <button @click="stopChat()">清空消息</button> -->
   </div>
+  <div
+    ref="dialogueInputRef"
+    style="width: 100%;height: 20px;background-color: red;"
+    contenteditable="true"
+    class="selection-ask-container"
+  ></div>
 </template>
 
 <script setup lang="ts">
@@ -87,6 +95,7 @@
   })
   const ckcAnswerRef = ref<InstanceType<typeof CkcAnswer> | null>(null)
   const selectionRootRef = ref<HTMLElement | null>(null)
+  const dialogueInputRef = ref<HTMLElement | null>(null)
   const {
     visible: selectionVisible,
     selectedText,
@@ -109,10 +118,26 @@
   function documentClick(message: Document) {
     console.log('documentClick', message)
   }
+  function insertTextIntoDialogue(text: string) {
+    const el = dialogueInputRef.value
+    if (!el) return
+    el.focus()
+    const selection = window.getSelection()
+    const range = document.createRange()
+    range.selectNodeContents(el)
+    range.collapse(false)
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+    const inserted = document.execCommand('insertText', false, text)
+    if (!inserted) {
+      el.append(document.createTextNode(text))
+    }
+  }
+
   function addSelectionToDialogue() {
     const text = selectedText.value
     if (!text.trim()) return
-    console.log('add to dialogue', text)
+    insertTextIntoDialogue(text)
     hideSelectionToolbar()
   }
   onMounted(() => {
@@ -143,7 +168,8 @@
   }
   .selection-ask-toolbar {
     position: fixed;
-    z-index: 3000;
+    z-index: 10000;
+    pointer-events: auto;
     transform: translate(-50%, -100%);
     display: flex;
     align-items: center;

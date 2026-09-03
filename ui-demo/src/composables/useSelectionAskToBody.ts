@@ -270,6 +270,96 @@ function isDiffsSurface(node: EventTarget | null): boolean {
   )
 }
 
+/** 代码块工具条、分割线、卡片操作等，不应触发划词 */
+function isChromeElement(el: Element): boolean {
+  const tag = String(el.tagName || '').toLowerCase()
+  if (
+    tag === 'button' ||
+    tag === 'hr' ||
+    tag === 'svg' ||
+    tag === 'path' ||
+    tag === 'circle' ||
+    tag === 'rect' ||
+    tag === 'g' ||
+    tag === 'img' ||
+    tag === 'input' ||
+    tag === 'textarea' ||
+    tag === 'select'
+  ) {
+    return true
+  }
+  const role = typeof el.getAttribute === 'function' ? el.getAttribute('role') : null
+  if (role === 'button' || role === 'menuitem' || role === 'menu' || role === 'separator') return true
+  return (
+    hasClass(el, 'code-block-header') ||
+    hasClass(el, 'code-action-btn') ||
+    hasClass(el, 'code-header-main') ||
+    hasClass(el, 'code-header-copy') ||
+    hasClass(el, 'code-header-title') ||
+    hasClass(el, 'code-header-caption') ||
+    hasClass(el, 'code-more-menu') ||
+    hasClass(el, 'code-diff-stats') ||
+    hasClass(el, 'action-icon') ||
+    hasClass(el, 'icon-slot') ||
+    hasClass(el, 'ckc-ui-file-card__more') ||
+    hasClass(el, 'ckc-ui-file-card__action') ||
+    hasClass(el, 'ckc-ui-file-card__popover')
+  )
+}
+
+function closestChrome(node: Node | null): Element | null {
+  let current: Node | null = node
+  while (current) {
+    if (isElement(current) && isChromeElement(current)) return current
+    current = parentOf(current)
+  }
+  return null
+}
+
+function isNodeInChrome(node: Node | null): boolean {
+  return !!closestChrome(node)
+}
+
+function isEventOnChrome(event: Event): boolean {
+  const path = eventPath(event)
+  for (let i = 0; i < path.length; i++) {
+    const node = path[i]
+    if (isElement(node) && isChromeElement(node)) return true
+  }
+  return false
+}
+
+/** 只保留正文文本，丢掉工具条/分割线里带出来的碎片 */
+function contentTextFromRange(range: Range): string {
+  if (isNodeInChrome(range.commonAncestorContainer)) return ''
+  const startChrome = isNodeInChrome(range.startContainer)
+  const endChrome = isNodeInChrome(range.endContainer)
+  if (startChrome && endChrome) return ''
+  if (!startChrome && !endChrome) return meaningfulText(range.toString())
+  try {
+    const frag = range.cloneContents()
+    if (typeof document.createTreeWalker !== 'function') return meaningfulText(range.toString())
+    const filter = typeof NodeFilter !== 'undefined' ? NodeFilter.SHOW_TEXT : 4
+    const walker = document.createTreeWalker(frag, filter)
+    const parts: string[] = []
+    let node = walker.nextNode()
+    while (node) {
+      if (!isNodeInChrome(node)) parts.push((node as Text).data || '')
+      node = walker.nextNode()
+    }
+    return meaningfulText(parts.join(''))
+  } catch {
+    return startChrome || endChrome ? '' : meaningfulText(range.toString())
+  }
+}
+
+function isChromeOnlyPayload(payload: SelectionAskPayload): boolean {
+  const node = payload.range?.commonAncestorContainer ?? payload.anchorNode ?? null
+  if (isNodeInChrome(node)) return true
+  if (payload.range && !contentTextFromRange(payload.range)) return true
+  return false
+}
+
 /** 坐标是否落在根矩形内（事件被改写 target 时用） */
 function rememberPointer(xy: { x: number; y: number } | null) {
   if (!xy) return
@@ -558,7 +648,7 @@ function visibleAnchorRect(payload: SelectionAskPayload): DOMRect | null {
 
 /** Range → payload；cloneRange 失败则直接挂原 Range */
 function payloadFromRange(range: Range, root: HTMLElement, looseRootCheck = false): SelectionAskPayload | null {
-  const text = meaningfulText(range.toString())
+  const text = contentTextFromRange(range)
   if (!text) return null
   if (
     !looseRootCheck &&
@@ -647,7 +737,7 @@ function getSelectionFromSelectionObject(
       } catch {
         continue
       }
-      const text = meaningfulText(range.toString()) || meaningfulText(selection.toString())
+      const text = contentTextFromRange(range)
       if (!text) continue
       if (range.collapsed && selection.rangeCount === 1) {
         const fromAnchor = getSelectionFromAnchorFocus(selection, root, looseRootCheck)
@@ -1370,6 +1460,7 @@ function tryRead(fn: () => SelectionAskPayload | null): SelectionAskPayload | nu
 function payloadFromCaretWalk(root: HTMLElement, start: CaretPoint, end: CaretPoint): SelectionAskPayload | null {
   const startNode = start.offsetNode
   const endNode = end.offsetNode
+  if (isNodeInChrome(startNode) && isNodeInChrome(endNode)) return null
   if (startNode === endNode && startNode.nodeType === TEXT_NODE) {
     const data = (startNode as Text).data || ''
     const a = Math.min(start.offset, end.offset)
@@ -1412,7 +1503,7 @@ function payloadFromCaretWalk(root: HTMLElement, start: CaretPoint, end: CaretPo
         break
       }
     } else if (started && node.nodeType === TEXT_NODE) {
-      parts.push((node as Text).data || '')
+      if (!isNodeInChrome(node)) parts.push((node as Text).data || '')
     }
     node = walker.nextNode()
   }
@@ -1425,6 +1516,7 @@ function payloadFromCaretWalk(root: HTMLElement, start: CaretPoint, end: CaretPo
 
 /** 按下点+松开点拼选区（最老内核兜底） */
 function getPayloadByPointer(root: HTMLElement, event: Event): SelectionAskPayload | null {
+  if (isEventOnChrome(event)) return null
   const xy = eventClientXY(event)
   if (!xy) return null
   const x = xy.x
@@ -1481,6 +1573,7 @@ function readLiveSelection(root: HTMLElement, event?: Event): SelectionAskPayloa
     tryRead(() => getLegacyDocumentSelection(root))
 
   const payload = monacoHost ? monacoPayload || nativePayload : nativePayload || monacoPayload
+  if (!payload || isChromeOnlyPayload(payload)) return null
   return tightenPayloadRect(payload, monacoHost)
 }
 
@@ -1533,6 +1626,7 @@ export function useSelectionAsk(
     overToolbarRect: boolean
     inRoot: boolean
     hadToolbar: boolean
+    onChrome: boolean
   } | null = null
 
   const CLICK_SLOP = 6
@@ -1755,9 +1849,21 @@ export function useSelectionAsk(
       dismissToolbarKeepSelection()
       return false
     }
-    const payload = readLiveSelection(root, event) || streamDiffsPayload || cachedPayload
+    const payload = readLiveSelection(root, event)
     if (payload) {
       scheduleShow(payload, immediate)
+      return true
+    }
+    if (event && isEventOnChrome(event)) {
+      dismissToolbarKeepSelection()
+      return false
+    }
+    if (streamDiffsPayload && !isChromeOnlyPayload(streamDiffsPayload)) {
+      scheduleShow(streamDiffsPayload, immediate)
+      return true
+    }
+    if (cachedPayload && !isChromeOnlyPayload(cachedPayload)) {
+      scheduleShow(cachedPayload, immediate)
       return true
     }
     return false
@@ -1824,8 +1930,9 @@ export function useSelectionAsk(
   function onSelectionChange() {
     const root = rootRef.value
     if (!root) return
+    if (gesture?.onChrome) return
     const payload = readLiveSelection(root)
-    if (payload) cachedPayload = payload
+    if (payload && !isChromeOnlyPayload(payload)) cachedPayload = payload
   }
 
   /** Esc 关闭；Shift+方向键扩展选区 */
@@ -1863,6 +1970,7 @@ export function useSelectionAsk(
     const inRoot = isEventInRoot(event)
     const onToolbarEl = isEventOnToolbarEl(event)
     const overToolbarRect = isPointOverToolbar(event)
+    const onChrome = isEventOnChrome(event)
 
     gesture = {
       startX: xy ? xy.x : 0,
@@ -1871,6 +1979,13 @@ export function useSelectionAsk(
       overToolbarRect: overToolbarRect && !isMultiClick,
       inRoot,
       hadToolbar: visible.value,
+      onChrome,
+    }
+
+    if (onChrome && !onToolbarEl) {
+      cachedPayload = null
+      streamDiffsPayload = null
+      skipNextSync = true
     }
 
     if (onToolbarEl && !isMultiClick) {
@@ -1935,6 +2050,13 @@ export function useSelectionAsk(
     const isClick = dist < CLICK_SLOP
     const isMultiClick = event.detail >= 2
     lastGestureWasDrag = !isClick
+
+    if (current?.onChrome && !current.onToolbarEl) {
+      skipNextSync = true
+      dismissToolbarKeepSelection()
+      streamDiffsDrag = null
+      return
+    }
 
     if (current?.onToolbarEl && !isMultiClick) {
       skipNextSync = true

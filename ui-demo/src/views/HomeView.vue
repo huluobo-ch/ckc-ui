@@ -99,7 +99,7 @@
   })
   const ckcAnswerRef = ref<InstanceType<typeof CkcAnswer> | null>(null)
   const selectionViewportRef = ref<HTMLElement | null>(null)
-  // const selectionViewportRef = ref<HTMLElement | null>(null)
+  const selectionRootRef = ref<HTMLElement | null>(null)
   const dialogueInputRef = ref<HTMLElement | null>(null)
   const {
     visible: selectionVisible,
@@ -108,7 +108,7 @@
     left: selectionLeft,
     toolbarRef: selectionToolbarRef,
     hide: hideSelectionToolbar,
-  } = useSelectionAsk(selectionViewportRef)
+  } = useSelectionAsk(selectionRootRef)
   const messages = ref<Message[]>([]);
   const historyMessages = ref<Message[]>([]);
   function alterMessages(actionsProps: any) {
